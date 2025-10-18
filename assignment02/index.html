@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Assignment02 - Canvas 版（Step 1）</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #f7f7fb; font-family: system-ui, sans-serif; }
+    .wrap { display: flex; align-items: center; justify-content: center; height: 100%; }
+    canvas { box-shadow: 0 8px 24px rgba(0,0,0,0.12); background: white; }
+    .hint { position: fixed; left: 12px; bottom: 12px; color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="app" width="1636" height="1788"></canvas>
+  </div>
+  <div class="hint">Step 1：仅绘制frame与工具栏，并实现模板悬停提示。后续将逐步接入拖拽与播放。</div>
+
+  <script>
+    const CANVAS_W = 1636, CANVAS_H = 1788;
+    const POS = {
+      frame: { x: 16, y: 14 },
+      circle_tpl: { x: 94,  y: 1484 },
+      triangle_tpl: { x: 356, y: 1484 },
+      square_tpl: { x: 618, y: 1484 },
+      play_btn: { x: 1140, y: 1562 },
+      clear_btn: { x: 1332, y: 1582 },
+    };
+    const IMG_SRC = {
+      frame: 'resource/frame.png',
+      circle: 'resource/circle.png',
+      triangle: 'resource/triangle.png',
+      square: 'resource/square.png',
+      play: 'resource/play.png',
+      pause: 'resource/pause.png',
+      clear: 'resource/clear.png',
+      dragit: 'resource/dragit.png',
+      scale_remove: 'resource/scale_remove.png',
+    };
+    const HOVER_PAD = 12;
+
+    const EMBED = {};
+    function assetPath(p) { return EMBED[p] || p; }
+
+    const canvas = document.getElementById('app');
+    const ctx = canvas.getContext('2d');
+
+    function loadImage(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = (e) => reject(e);
+        img.src = assetPath(src);
+      });
+    }
+
+    function pointInExtent(x, y, ext) {
+      const [x0, x1, y0, y1] = ext;
+      return (x >= x0 && x <= x1 && y >= y0 && y <= y1);
+    }
+    function computeHoverExtent(img, x, y) {
+      const w = img.width, h = img.height;
+      let x0 = x + HOVER_PAD;
+      let y0 = y - h - HOVER_PAD;
+      if (y0 < 0) y0 = y + HOVER_PAD;
+      if (x0 + w > CANVAS_W) x0 = x - w - HOVER_PAD;
+      x0 = Math.max(0, Math.min(x0, CANVAS_W - w));
+      y0 = Math.max(0, Math.min(y0, CANVAS_H - h));
+      return { x: x0, y: y0, w, h };
+    }
+
+    function clientToCanvas(ev) {
+      const rect = canvas.getBoundingClientRect();
+      const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (ev.clientY - rect.top) * (canvas.height / rect.height);
+      return { x, y };
+    }
+    function inFrame(x, y) {
+      const f = UI.frame;
+      return (x >= f.x && x <= f.x + f.w && y >= f.y && y <= f.y + f.h);
+    }
+    function clampIntoFrame(x, y, w, h) {
+      const f = UI.frame;
+      const nx = Math.max(f.x, Math.min(x, f.x + f.w - w));
+      const ny = Math.max(f.y, Math.min(y, f.y + f.h - h));
+      return { x: nx, y: ny };
+    }
+
+    function getShapeUnderPointer(x, y) {
+      for (let i = placedShapes.length - 1; i >= 0; i--) {
+        const s = placedShapes[i];
+        if (pointInExtent(x, y, [s.x, s.x + s.w, s.y, s.y + s.h])) return i;
+      }
+      return -1;
+    }
+    // computeScaleRemovePos 已移除，改用形状内上下划缩放与长按删除
+
+    // 音频：预加载与播放辅助
+    const audios = {};
+    let isPlaying = false;
+    let activeTimers = [];
+    const LOOP_MS = 4000; // 一个循环的时长（毫秒）
+    const playhead = { running: false, startTs: 0 };
+
+    async function loadAudio(src) {
+      return new Promise((resolve) => {
+        const a = new Audio();
+        a.preload = 'auto';
+        a.src = assetPath(src);
+        a.oncanplaythrough = () => resolve(a);
+        a.onerror = () => resolve(a);
+      });
+    }
+
+    async function loadAllAudio() {
+      const keys = [];
+      for (let i = 1; i <= 7; i++) {
+        keys.push(`piano_${i}`);
+        keys.push(`synth_${i}`);
+      }
+      for (let i = 1; i <= 3; i++) keys.push(`drum_${i}`);
+      keys.push('play','pause','remove','scale');
+      for (const k of keys) {
+        audios[k] = await loadAudio(`sounds/${k}.mp3`);
+      }
+    }
+
+    function playSample(key) {
+      const base = audios[key];
+      if (!base) return;
+      const a = base.cloneNode(true);
+      a.play().catch(() => {});
+    }
+
+    function pickSampleForShape(s) {
+      const f = UI.frame;
+      const rel = Math.max(0, Math.min(1, (s.y - f.y) / f.h));
+      if (s.kind === 'circle') {
+        const idx = 1 + Math.floor(rel * 7);
+        return `piano_${Math.max(1, Math.min(7, idx))}`;
+      } else if (s.kind === 'triangle') {
+        const idx = 1 + Math.floor(rel * 7);
+        return `synth_${Math.max(1, Math.min(7, idx))}`;
+      } else if (s.kind === 'square') {
+        const idx = 1 + Math.floor(rel * 3);
+        return `drum_${Math.max(1, Math.min(3, idx))}`;
+      }
+      return null;
+    }
+
+    function schedulePlayback() {
+      // 基于 x 相对 frame 的位置进行时间映射，循环播放
+      const f = UI.frame;
+      const startTs = performance.now();
+      playhead.running = true;
+      playhead.startTs = startTs;
+      const seq = [...placedShapes].sort((a,b) => (a.x + a.w/2) - (b.x + b.w/2));
+      activeTimers = [];
+      for (const s of seq) {
+        const cx = s.x + s.w/2;
+        const rel = Math.max(0, Math.min(1, (cx - f.x) / f.w));
+        const delay = Math.round(rel * LOOP_MS);
+        const key = pickSampleForShape(s);
+        activeTimers.push(setTimeout(() => { if (isPlaying && key) playSample(key); }, delay));
+      }
+      // 下一轮循环
+      activeTimers.push(setTimeout(() => { if (isPlaying) schedulePlayback(); }, LOOP_MS));
+      // 播放反馈音
+      playSample('play');
+    }
+
+    function stopPlayback() {
+      for (const id of activeTimers) clearTimeout(id);
+      activeTimers = [];
+      playhead.running = false;
+      playSample('pause');
+    }
+
+    function togglePlay() {
+      if (!isPlaying) {
+        isPlaying = true;
+        UI.play_btn.img = images.pause;
+        schedulePlayback();
+        // 这里为单次播放；如需循环可在 setInterval 中重复调用 schedulePlayback
+      } else {
+        isPlaying = false;
+        UI.play_btn.img = images.play;
+        stopPlayback();
+      }
+    }
+
+    function clearAll() {
+      placedShapes.length = 0;
+      playSample('remove');
+    }
+
+    const images = {};
+    const UI = {};
+    let hoverTip = null; // { kind, img, pos:{x,y,w,h} }
+    const placedShapes = [];
+    const drag = { active: false, kind: null, img: null, x: 0, y: 0, w: 0, h: 0, from: null };
+    const edit = { active: false, idx: -1, startY: 0, initialW: 0, initialH: 0, timerId: null, moved: false, scaled: false };
+
+    async function boot() {
+      // 加载资源
+      for (const k of Object.keys(IMG_SRC)) {
+        images[k] = await loadImage(IMG_SRC[k]);
+      }
+      await loadAllAudio();
+      // 构建UI对象（记录尺寸）
+      UI.frame = { img: images.frame, x: POS.frame.x, y: POS.frame.y, w: images.frame.width, h: images.frame.height };
+      UI.circle_tpl = { img: images.circle, x: POS.circle_tpl.x, y: POS.circle_tpl.y, w: images.circle.width, h: images.circle.height };
+      UI.triangle_tpl = { img: images.triangle, x: POS.triangle_tpl.x, y: POS.triangle_tpl.y, w: images.triangle.width, h: images.triangle.height };
+      UI.square_tpl = { img: images.square, x: POS.square_tpl.x, y: POS.square_tpl.y, w: images.square.width, h: images.square.height };
+      UI.play_btn = { img: images.play, x: POS.play_btn.x, y: POS.play_btn.y, w: images.play.width, h: images.play.height };
+      UI.clear_btn = { img: images.clear, x: POS.clear_btn.x, y: POS.clear_btn.y, w: images.clear.width, h: images.clear.height };
+
+      // 事件：模板悬停/拖拽到 frame 放置
+      canvas.addEventListener('mousedown', (ev) => {
+        const { x, y } = clientToCanvas(ev);
+        // 形状内上下划缩放；长按删除
+        const idx = getShapeUnderPointer(x, y);
+        if (idx !== -1) {
+          const s = placedShapes[idx];
+          edit.active = true;
+          edit.idx = idx;
+          edit.startY = y;
+          edit.initialW = s.w;
+          edit.initialH = s.h;
+          edit.moved = false;
+          edit.scaled = false;
+          hoverTip = null;
+          if (edit.timerId) { clearTimeout(edit.timerId); }
+          edit.timerId = setTimeout(() => {
+            if (edit.active && !edit.moved) {
+              const target = placedShapes[edit.idx];
+              if (target) {
+                placedShapes.splice(edit.idx, 1);
+                playSample('remove');
+              }
+              edit.active = false;
+              edit.idx = -1;
+              edit.timerId = null;
+            }
+          }, 650);
+          ev.preventDefault();
+          return;
+        }
+        // 按钮点击：play/pause 与 clear
+        const playExt = [UI.play_btn.x, UI.play_btn.x + UI.play_btn.w, UI.play_btn.y, UI.play_btn.y + UI.play_btn.h];
+        if (pointInExtent(x, y, playExt)) { togglePlay(); ev.preventDefault(); return; }
+        const clearExt = [UI.clear_btn.x, UI.clear_btn.x + UI.clear_btn.w, UI.clear_btn.y, UI.clear_btn.y + UI.clear_btn.h];
+        if (pointInExtent(x, y, clearExt)) { clearAll(); ev.preventDefault(); return; }
+        // 从模板开始拖拽
+        for (const key of ['circle_tpl','triangle_tpl','square_tpl']) {
+          const u = UI[key];
+          const ext = [u.x, u.x + u.w, u.y, u.y + u.h];
+          if (pointInExtent(x, y, ext)) {
+            const kind = key.replace('_tpl','');
+            const img = images[kind];
+            drag.active = true;
+            drag.kind = kind;
+            drag.img = img;
+            drag.w = img.width;
+            drag.h = img.height;
+            drag.x = x;
+            drag.y = y;
+            drag.from = key;
+            hoverTip = null;
+            ev.preventDefault();
+            break;
+          }
+        }
+      });
+
+      canvas.addEventListener('mousemove', (ev) => {
+        const { x, y } = clientToCanvas(ev);
+        if (drag.active) {
+          drag.x = x; drag.y = y;
+          hoverTip = null;
+          return;
+        }
+        if (edit.active) {
+          const s = placedShapes[edit.idx];
+          if (!s) return;
+          const dy = y - edit.startY;
+          const moveThresh = 6;
+          if (Math.abs(dy) > moveThresh) edit.moved = true;
+          const sensitivity = 0.002; // 上划(负dy)更大，下划更小
+          let factor = 1 - dy * sensitivity;
+          factor = Math.max(0.5, Math.min(3.0, factor));
+          s.w = Math.round(edit.initialW * factor);
+          s.h = Math.round(edit.initialH * factor);
+          const cl = clampIntoFrame(s.x, s.y, s.w, s.h);
+          s.x = cl.x; s.y = cl.y;
+          hoverTip = null;
+          return;
+        }
+        // 其次：模板悬停提示 dragit
+        let needsTip = false;
+        for (const key of ['circle_tpl', 'triangle_tpl', 'square_tpl']) {
+          const u = UI[key];
+          const ext = [u.x, u.x + u.w, u.y, u.y + u.h];
+          if (pointInExtent(x, y, ext)) {
+            hoverTip = { kind: 'dragit', img: images.dragit, pos: computeHoverExtent(images.dragit, x, y) };
+            needsTip = true;
+            break;
+          }
+        }
+        if (!needsTip) hoverTip = null;
+      });
+
+      canvas.addEventListener('mouseup', (ev) => {
+        const { x, y } = clientToCanvas(ev);
+        if (drag.active) {
+          const w = drag.w, h = drag.h;
+          let tlx = x - w/2;
+          let tly = y - h/2;
+          const cl = clampIntoFrame(tlx, tly, w, h);
+          if (inFrame(x, y)) {
+            const newShape = { kind: drag.kind, img: drag.img, x: cl.x, y: cl.y, w, h };
+            placedShapes.push(newShape);
+            const key = pickSampleForShape(newShape);
+            if (key) playSample(key);
+          }
+          drag.active = false;
+          drag.kind = null;
+          drag.img = null;
+          return;
+        }
+        if (edit.active) {
+          if (edit.timerId) { clearTimeout(edit.timerId); edit.timerId = null; }
+          if (edit.moved) { playSample('scale'); }
+          edit.active = false;
+          edit.idx = -1;
+        }
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        hoverTip = null;
+        drag.active = false;
+        if (edit.timerId) { clearTimeout(edit.timerId); edit.timerId = null; }
+        edit.active = false;
+        edit.idx = -1;
+      });
+
+      requestAnimationFrame(draw);
+    }
+
+    function drawBackground() {
+      const grad = ctx.createLinearGradient(0, 0, 0, CANVAS_H);
+      grad.addColorStop(0, '#E0BCF3');
+      grad.addColorStop(1, '#7EE7EE');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    }
+
+    function draw() {
+      // 背景
+      drawBackground();
+      // UI 图像
+      for (const key of Object.keys(UI)) {
+        const u = UI[key];
+        ctx.drawImage(u.img, u.x, u.y);
+      }
+      // 已放置形状（支持缩放宽高绘制）
+      for (const s of placedShapes) {
+        ctx.drawImage(s.img, s.x, s.y, s.w, s.h);
+      }
+      // 拖拽预览
+      if (drag.active && drag.img) {
+        ctx.globalAlpha = 0.85;
+        ctx.drawImage(drag.img, drag.x - drag.w/2, drag.y - drag.h/2);
+        ctx.globalAlpha = 1;
+      }
+      // 播放指针
+      if (isPlaying && playhead.running) {
+        const f = UI.frame;
+        const now = performance.now();
+        const elapsed = (now - playhead.startTs) % LOOP_MS;
+        const px = f.x + (elapsed / LOOP_MS) * f.w;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,0,0,0.75)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(px, f.y);
+        ctx.lineTo(px, f.y + f.h);
+        ctx.stroke();
+        ctx.restore();
+      }
+      // 悬停提示
+      if (hoverTip) {
+        ctx.drawImage(hoverTip.img, hoverTip.pos.x, hoverTip.pos.y);
+      }
+      requestAnimationFrame(draw);
+    }
+
+    boot().catch(err => {
+      console.error('初始化失败:', err);
+      ctx.fillStyle = '#d00';
+      ctx.font = '16px system-ui';
+      ctx.fillText('初始化失败：' + (err && err.message ? err.message : err), 16, 32);
+    });
+  </script>
+</body>
+</html>

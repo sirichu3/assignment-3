@@ -3,9 +3,10 @@
 ## 中文说明
 
 - 本项目提供两个实现：
-  - `index.html`（Canvas 版，浏览器运行）
-  - `ui.py`（Matplotlib/Pygame 版，Python 运行）
-- 你可以从模板区拖拽形状到 `frame` 内，按住形状上下滑动进行缩放，长按约 650ms 删除。右侧工具栏支持播放/暂停与清空。播放时有红色竖线“播放指针”沿 `frame` 水平移动，按每个形状的横向位置触发音色，循环播放。
+  -  `ui.py`（Matplotlib/Pygame 版，Python 运行）
+  -  `index.html`（Canvas 版，浏览器运行）
+- 你可以从模板区拖拽形状到 `frame` 内，按住形状上下滑动进行缩放，长按约 650ms 删除。右侧工具栏支持播放/暂停与清空。播放时frame中的图形按按某种规律从左到右依次触发音色，循环播放。
+- 两个实现的具体效果不完全相同，Matplotlib/Pygame 版（即ui.py）是推荐运行版本，如无法运行，再尝试运行html文件查看简化版。
 
 ### 主要特性
 - 拖拽放置：从模板区拖拽 `circle/triangle/square` 到 `frame`。
@@ -47,7 +48,7 @@
 - `resource/`：UI 与形状图片
 - `sounds/`：音频资源（piano/synth/drum/反馈音）
 - `ui.py` / `ui copy.py`：Python 交互版本
-- `music.py`：丑陋版本
+- `music.py`：与音频相关的辅助逻辑（如有）
 
 ### 故障排查
 - 模块缺失：`pip install <模块名>`（如 `numpy`、`matplotlib`、`pygame`、`PyQt5`）
@@ -59,9 +60,10 @@
 ## English
 
 - Two implementations are provided:
-  - `index.html` (Canvas version for browsers)
   - `ui.py` (Matplotlib/Pygame version for Python)
-- Drag shapes from the template area into the `frame`. Inside a shape, vertical drag scales it; long press (~650ms) deletes it. The toolbar offers Play/Pause and Clear. During playback, a red playhead moves across the `frame` and triggers sounds according to shapes’ horizontal positions, looping continuously.
+  - `index.html` (Canvas version for browsers)
+- Drag shapes from the template area into the `frame`. Inside a shape, vertical drag scales it; long press (~650ms) deletes it. The toolbar offers Play/Pause and Clear. During playback, the graphics in the frame are triggered in turn from left to right according to a certain pattern, and they are played in a loop.
+- The specific effect of the two implementations is not exactly the same, Matplotlib/Pygame version (i.e. ui.py) is the recommended running version, if it cannot be run, try to run the html file to view the simplified version.
 
 ### Features
 - Drag & drop: place `circle/triangle/square` into the `frame`.
@@ -103,7 +105,7 @@
 - `resource/`: UI and shape images
 - `sounds/`: audio assets (piano/synth/drum/feedback)
 - `ui.py` / `ui copy.py`: Python implementation
-- `music.py`: ugly version
+- `music.py`: audio-related helpers (if used)
 
 ### Troubleshooting
 - Missing modules: `pip install <module>` (e.g., `numpy`, `matplotlib`, `pygame`, `PyQt5`).

@@ -47,8 +47,7 @@
 - `bundle.py`：资源 Base64 内联打包脚本
 - `resource/`：UI 与形状图片
 - `sounds/`：音频资源（piano/synth/drum/反馈音）
-- `ui.py` / `ui copy.py`：Python 交互版本
-- `music.py`：与音频相关的辅助逻辑（如有）
+- `ui.py`：Python 交互版本
 
 ### 故障排查
 - 模块缺失：`pip install <模块名>`（如 `numpy`、`matplotlib`、`pygame`、`PyQt5`）

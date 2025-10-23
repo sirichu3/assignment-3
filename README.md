@@ -104,8 +104,7 @@
 - `bundle.py`: Base64 embedding script for resources
 - `resource/`: UI and shape images
 - `sounds/`: audio assets (piano/synth/drum/feedback)
-- `ui.py` / `ui copy.py`: Python implementation
-- `music.py`: audio-related helpers (if used)
+- `ui.py`: Python implementation
 
 ### Troubleshooting
 - Missing modules: `pip install <module>` (e.g., `numpy`, `matplotlib`, `pygame`, `PyQt5`).
